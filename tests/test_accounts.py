@@ -45,7 +45,7 @@ class Isolation(unittest.TestCase):
                 try:
                     self.assertEqual(req(1,"initialize",{})["serverInfo"]["name"],PRODUCT["id"])
                     names={x["name"] for x in req(2,"tools/list",{})["tools"]}
-                    self.assertEqual(names,{"ldai_accounts","work__"+tool,"personal__"+tool})
+                    self.assertEqual(names,{"ldai_accounts","ldai_manage_accounts","work__"+tool,"personal__"+tool})
                     for i,alias in enumerate(["work","personal","work"]):
                         reply=req(3+i,"tools/call",{"name":alias+"__"+tool,"arguments":{}})
                         self.assertEqual(reply["content"][0]["text"],alias)

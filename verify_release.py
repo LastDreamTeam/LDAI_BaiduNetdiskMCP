@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 PUBLIC_HOSTS = {
     "agent-plugins.org", "cursor.com", "fsf.org", "github.com", "www.gnu.org", "www.w3.org",
-    "pan.baidu.com", "yun.baidu.com", "hestiacp.com", "mailu.io", "www.yxtown.com",
+    "d.pcs.baidu.com", "pan.baidu.com", "yun.baidu.com", "hestiacp.com", "mailu.io", "www.yxtown.com",
     "yxtown.com", "files.pythonhosted.org",
 }
 SECRET = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[\w]{20,}|sk-[A-Za-z0-9_-]{20,}|oc_sk_[\w-]{14,}|ya29\.[\w-]{14,}|AKIA[A-Z0-9]{16})|-----BEGIN (?:[A-Z ]+ )?PRIVATE KEY-----")

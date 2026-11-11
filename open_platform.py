@@ -42,7 +42,12 @@ def metadata(endpoint, token, params):
 def query(method, **params):
     if not params["dir"].startswith("/") or ".." in params["dir"].split("/"):
         raise ValueError("Supply an absolute directory within the authorized account.")
+    from baidu_transfer import scoped
+    scoped(params["dir"])
     entries = metadata("file", token_value(), {"method":method, **params})
+    for item in entries:
+        if item.get("path"):scoped(item["path"])
+        elif os.getenv("BAIDU_OAUTH_ROOT","/")!="/":raise ValueError("Missing scoped path.")
     fields = ("fs_id","path","server_filename","isdir","size","server_mtime")
     return [{k:item[k] for k in fields if k in item} for item in entries]
 
@@ -60,7 +65,9 @@ class DownloadRedirect(HTTPRedirectHandler):
         trusted_download(newurl)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
-def download_file(file_id, target, max_bytes):
+def download_file(file_id, target, max_bytes,rate_kib_s=0):
+    from baidu_transfer import scoped,Pacer
+    pacer=Pacer(rate_kib_s)
     if target.exists():
         raise ValueError("Destination already exists.")
     token = token_value()
@@ -68,6 +75,10 @@ def download_file(file_id, target, max_bytes):
     info = next((i for i in entries if str(i.get("fs_id")) == str(file_id)), None)
     if not info or info.get("isdir") or not info.get("dlink"):
         raise ValueError("No downloadable file in this authorization scope.")
+    if info.get("path"):
+        scoped(info["path"])
+    elif os.environ.get("BAIDU_OAUTH_ROOT","/")!="/":
+        raise ValueError("No path available to verify the scoped directory.")
     expected = int(info["size"])
     if expected < 0 or expected > max_bytes:
         raise ValueError("File exceeds the requested size limit.")
@@ -81,7 +92,8 @@ def download_file(file_id, target, max_bytes):
         digest = hashlib.sha256()
         try:
             with build_opener(DownloadRedirect()).open(req,timeout=60) as response, stage.open("xb") as stream:
-                while chunk := response.read(1024*1024):
+                while chunk := response.read(min(65536,max(1024,pacer.rate//4)) if pacer.rate else 1024*1024):
+                    pacer.wait(len(chunk))
                     received += len(chunk)
                     if received > expected:
                         raise ValueError("Received more data than the declared file size.")

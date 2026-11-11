@@ -24,7 +24,7 @@ def profiles():
     if data.get("connector") != NAME:
         raise ValueError("Account file is for a different connector.")
     entries = data["accounts"]
-    if not isinstance(entries, dict) or not entries:
+    if not isinstance(entries, dict):
         raise ValueError("Define at least one named account.")
     for name, entry in entries.items():
         if not PROFILE_NAME.fullmatch(name) or not isinstance(entry, dict):
@@ -53,16 +53,18 @@ def profiles():
         if len(entries)>1 and "command" not in entry:
             required = PRODUCT["requiredMulti"]
             if NAME=="netease-music" and not entry.get("accountHome"):
-                raise ValueError("Set a distinct accountHome for each music CLI account.")
+                entry["_invalid"]="Each music CLI account needs its own accountHome."
             if NAME=="mailu" and env.get("MAILU_IMAP_USER"):
                 required=["MAILU_IMAP_HOST","MAILU_IMAP_USER","MAILU_IMAP_PASSWORD_FILE"]
+            if NAME=="mailu" and not env.get("MAILU_IMAP_USER") and env.get("MAILU_SMTP_USER"):
+                required=["MAILU_SMTP_HOST","MAILU_SMTP_USER","MAILU_SMTP_PASSWORD_FILE"]
             for key in required:
                 if not env.get(key):
-                    raise ValueError(f"Account {alias} needs its own {key}.")
-            identity=tuple(env[k] for k in required)
+                    entry["_invalid"]=f"Configure {key} for this account."
+            identity=tuple(env.get(k) for k in required)
             if identity in seen:
-                raise ValueError("Multiple named accounts use the same profile.")
-            seen.add(identity)
+                entry["_invalid"]="This profile duplicates another account."
+            if "_invalid" not in entry:seen.add(identity)
         entry["env"] = env
     return entries
 
@@ -105,6 +107,8 @@ class Worker:
                             for k in PRODUCT["providerEnvironment"]:
                                 env.pop(k,None)
                         env.update(self.config.get("env",{}))
+                        env["LDAI_ACCOUNT_ALIAS"]=self.alias
+                        env["LDAI_PLUGIN_ROOT"]=str(ROOT)
                         if "command" in self.config:
                             argv = [self.config["command"],*self.config.get("args",[])]
                         elif PRODUCT["runtime"] == "node":
@@ -115,7 +119,7 @@ class Worker:
                             stdin=asyncio.subprocess.PIPE,stdout=asyncio.subprocess.PIPE,
                             stderr=asyncio.subprocess.DEVNULL,limit=LIMIT)
                         await self.packet("initialize",{"protocolVersion":"2025-06-18","capabilities":{},
-                                                       "clientInfo":{"name":"account-router","version":"0.2.0"}})
+                                                       "clientInfo":{"name":"account-router","version":PRODUCT["version"]}})
                         self.proc.stdin.write(b'{"jsonrpc":"2.0","method":"notifications/initialized"}\n')
                         await self.proc.stdin.drain()
                     return await self.packet(method,params)
@@ -137,6 +141,9 @@ def exposed(alias, tool):
 async def discover():
     async with discovery_lock:
         async def tools_for(alias,w):
+            if w.config.get("_invalid"):
+                ERRORS[alias]=w.config["_invalid"]
+                return []
             found=[]
             cursor=None
             try:
@@ -169,10 +176,50 @@ async def discover():
         ROUTES.clear()
         ROUTES.update(names)
         return [{"name":"ldai_accounts","description":"List configured account aliases and discovery status.",
-                 "inputSchema":{"type":"object","properties":{},"additionalProperties":False}},*schemas]
+                 "inputSchema":{"type":"object","properties":{},"additionalProperties":False}},{"name":"ldai_manage_accounts","description":"Open the local desktop account manager to add, rename, reconnect or disconnect accounts.","inputSchema":{"type":"object","properties":{},"additionalProperties":False}},*schemas]
 
 def payload(data, failed=False):
     return {"content":[{"type":"text","text":json.dumps(data,ensure_ascii=False)}],"isError":failed}
+
+
+manager_process=None
+
+async def sync_profiles():
+    async with discovery_lock:
+        config=profiles()
+        if list(config)==list(WORKERS) and all(WORKERS[a].config==v for a,v in config.items()):
+            return
+        previous=dict(WORKERS)
+        WORKERS.clear()
+        for alias,settings in config.items():
+            w=previous.pop(alias,None)
+            if w and w.config==settings:
+                WORKERS[alias]=w
+            else:
+                if w:previous[alias]=w
+                WORKERS[alias]=Worker(alias,settings)
+        ROUTES.clear();ERRORS.clear()
+        for w in previous.values():
+            async with w.lock:
+                await w.close()
+
+def open_manager():
+    global manager_process
+    from account_manager import location
+    import subprocess
+    if manager_process and manager_process.poll() is None:
+        return {"opened":True,"message":"账号管理窗口已打开。"}
+    executable=Path(sys.executable)
+    if os.name=="nt" and executable.with_name("pythonw.exe").is_file():
+        executable=executable.with_name("pythonw.exe")
+    if sys.platform.startswith("linux") and not (os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY")):
+        return {"opened":False,"reason":"本机没有图形会话。可在有桌面的执行器运行账号管理器，或编辑用户配置。","config_file":str(location()),"script":str(ROOT/"account_manager.py")}
+    import importlib.util
+    if importlib.util.find_spec("tkinter") is None:
+        return {"opened":False,"reason":"请安装 Python Tk 支持。","config_file":str(location())}
+    manager_process=subprocess.Popen([str(executable),str(ROOT/"account_manager.py")],cwd=ROOT,
+                                    stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    return {"opened":True,"message":"已在插件执行器打开账号管理窗口。修改后刷新客户端的工具列表。"}
 
 async def handle(r):
     method=r.get("method")
@@ -183,12 +230,21 @@ async def handle(r):
                 "serverInfo":{"name":NAME,"version":PRODUCT["version"]}}
     if method=="ping":
         return {}
+    if method in ("tools/list","tools/call") and r.get("params",{}).get("name")!="ldai_manage_accounts":
+        try:
+            await sync_profiles()
+        except (OSError,ValueError,TypeError,KeyError):
+            if method=="tools/list":
+                return {"tools":[{"name":"ldai_manage_accounts","description":"Open the account manager to repair the configuration.","inputSchema":{"type":"object","properties":{}}}]}
+            return payload("Account configuration is invalid. Open the account manager and check the profiles.",True)
     if method=="tools/list":
         return {"tools":await discover()}
     if method=="tools/call":
         p=r["params"]
+        if p["name"]=="ldai_manage_accounts":
+            return payload(open_manager())
         if p["name"]=="ldai_accounts":
-            return payload({"accounts":list(WORKERS),"discoveryErrors":dict(ERRORS)})
+            return payload({"accounts":list(WORKERS),"labels":{a:w.config.get("label",a) for a,w in WORKERS.items()},"discoveryErrors":dict(ERRORS)})
         if not ROUTES:
             await discover()
         route=ROUTES.get(p["name"])
@@ -202,7 +258,6 @@ async def handle(r):
     raise LookupError
 
 async def main():
-    WORKERS.update({alias:Worker(alias,cfg) for alias,cfg in profiles().items()})
     pending={}
     async def respond(r):
         resp={"jsonrpc":"2.0","id":r["id"]}

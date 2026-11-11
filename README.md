@@ -46,6 +46,12 @@ GitHub 数据核对日期为 2026-11-11。
 
 本项目以 **GNU Affero General Public License v3.0 only（AGPL-3.0-only）** 发布。分发受许可覆盖的修改版或通过网络向用户提供修改版时，应按许可条款向相应用户提供对应源码。仅在本机自行使用无需公开发布。第三方服务及依赖遵循各自条款。[许可全文](LICENSE)
 
+## 账号管理窗口
+
+在 Codex 对本插件说「管理账号」，或直接运行 python account_manager.py。在窗口中新增连接、编辑显示名和标识、重新连接或断开，修改后刷新客户端工具列表。站点和凭据文件路径仅存当前操作系统用户的配置。已有自定义适配器保留其授权方式；可并行添加原生账号。图形窗口需要 Python 的 Tk 组件，远程无桌面执行器可使用账号 JSON。
+
+bdpan 官方登录脚本完成应用空间授权。BDPAN_APP_ROOT 可限定应用内目录，BAIDU_OAUTH_ROOT 限定开放平台目录，实际权限由服务商授予。开放平台 Token 文件需要目标目录及上传权限。支持文件元数据、带分页预算的目录大小、批量上传和以 KiB/s 为单位的开放平台分块上传/下载限速。批量失败返回已完成、待核对和未尝试的项目。限速大文件可能超过客户端工具调用时限；请按文件大小调整时限或分批传输。
+
 ## 多账号和终端更新
 
 MCP 入口为 `router.py`，需要 Python 3.11+。主机在本地保存账号配置，默认位置为 `~/.config/ldai-mcp/baidu-netdisk/accounts.json`，也可用 `LDAI_ACCOUNTS_FILE` 指定。复制 [两账号示例](examples/accounts.example.json)，将地址与路径换成自己的值。每个账号使用单独的 bdpan 配置目录。登录官方 CLI 时设置该账号的 BDPAN_CONFIG_DIR，accountHome 默认将它指向该目录下的 .config/bdpan，并单独保存交换文件。
