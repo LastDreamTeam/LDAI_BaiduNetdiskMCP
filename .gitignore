@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.py[cod]
+node_modules/
+.env*
+data/
+chrome-extension/
+bridge.json
+study.json
+config.js
+*.pem
+*.key
+*.log
+*.zip
+.DS_Store

@@ -1,0 +1,20 @@
+{
+  "name": "baidu-netdisk",
+  "version": "0.1.0",
+  "description": "通过 bdpan 和可选的百度网盘开放平台授权管理用户的网盘文件。",
+  "author": {
+    "name": "LastDreamTeam"
+  },
+  "skills": "./skills",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "百度网盘",
+    "shortDescription": "通过 bdpan 和可选的百度网盘开放平台授权管理用户的网盘文件。",
+    "developerName": "LastDreamTeam",
+    "logo": "./assets/icon.svg",
+    "composerIcon": "./assets/icon.svg",
+    "defaultPrompt": [
+      "检查当前连接状态"
+    ]
+  }
+}
