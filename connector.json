@@ -1,0 +1,17 @@
+{
+  "id": "baidu-netdisk",
+  "version": "0.2.0",
+  "repository": "https://github.com/LastDreamTeam/LDAI_BaiduNetdiskMCP",
+  "runtime": "python",
+  "toolPrefixes": [
+    "baidu_"
+  ],
+  "providerEnvironment": [
+    "BDPAN_CONFIG_DIR",
+    "BDPAN_EXCHANGE_DIR",
+    "BAIDU_ACCESS_TOKEN_FILE"
+  ],
+  "requiredMulti": [
+    "BDPAN_CONFIG_DIR"
+  ]
+}

@@ -4,12 +4,10 @@ import argparse
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 
 NAME = "baidu-netdisk"
-IS_NODE = False
-ALLOWED = ['BDPAN_BIN', 'BDPAN_EXCHANGE_DIR', 'BAIDU_ACCESS_TOKEN_FILE']
+ALLOWED = ['LDAI_ACCOUNTS_FILE', 'LDAI_MCP_PYTHON', 'BDPAN_CONFIG_DIR', 'BDPAN_EXCHANGE_DIR', 'BAIDU_ACCESS_TOKEN_FILE', 'BDPAN_BIN']
 ROOT = Path(__file__).resolve().parent
 
 def main():
@@ -24,15 +22,9 @@ def main():
         if key not in ALLOWED or not separator or not value:
             parser.error("Allowed path/settings keys: " + ", ".join(sorted(ALLOWED)))
         env[key] = value
-    if IS_NODE:
-        command = shutil.which("node")
-        if not command:
-            parser.error("Install Node.js 22 or newer.")
-        argv = [str(ROOT / "server.mjs"), "--stdio"]
-    else:
-        venv = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-        command = str(venv) if venv.is_file() else sys.executable
-        argv = [str(ROOT / "server.py")]
+    venv = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    command = str(venv) if venv.is_file() else sys.executable
+    argv = [str(ROOT / "router.py")]
     entry = {"command":command,"args":argv}
     if env:
         entry["env"] = env

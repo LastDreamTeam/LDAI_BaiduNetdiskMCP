@@ -13,3 +13,6 @@ config.js
 *.log
 *.zip
 .DS_Store
+dist/
+accounts.json
+profiles/

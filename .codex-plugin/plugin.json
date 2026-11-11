@@ -1,20 +1,25 @@
 {
   "name": "baidu-netdisk",
-  "version": "0.1.0",
-  "description": "通过 bdpan 和可选的百度网盘开放平台授权管理用户的网盘文件。",
+  "version": "0.2.0",
+  "description": "通过 bdpan 和可选的开放平台 OAuth 查询、上传、下载和管理使用者自己的网盘文件。",
   "author": {
     "name": "LastDreamTeam"
   },
-  "skills": "./skills",
-  "mcpServers": "./.mcp.json",
+  "repository": "https://github.com/LastDreamTeam/LDAI_BaiduNetdiskMCP",
+  "homepage": "https://github.com/LastDreamTeam/LDAI_BaiduNetdiskMCP",
+  "license": "AGPL-3.0-only",
   "interface": {
     "displayName": "百度网盘",
-    "shortDescription": "通过 bdpan 和可选的百度网盘开放平台授权管理用户的网盘文件。",
+    "shortDescription": "查询和管理已授权的网盘文件",
+    "longDescription": "通过 bdpan 和可选的开放平台 OAuth 查询、上传、下载和管理使用者自己的网盘文件。",
     "developerName": "LastDreamTeam",
+    "category": "Productivity",
     "logo": "./assets/icon.svg",
     "composerIcon": "./assets/icon.svg",
     "defaultPrompt": [
-      "检查当前连接状态"
+      "搜索我网盘里的文件"
     ]
-  }
+  },
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills"
 }

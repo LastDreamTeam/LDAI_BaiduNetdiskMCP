@@ -1,0 +1,17 @@
+{
+  "connector": "baidu-netdisk",
+  "accounts": {
+    "work": {
+      "accountHome": "/private/work",
+      "env": {
+        "BAIDU_ACCESS_TOKEN_FILE": "/private/work/baidu-oauth"
+      }
+    },
+    "personal": {
+      "accountHome": "/private/personal",
+      "env": {
+        "BAIDU_ACCESS_TOKEN_FILE": "/private/personal/baidu-oauth"
+      }
+    }
+  }
+}
