@@ -13,7 +13,9 @@
     "BDPAN_BIN",
     "BDPAN_LOGIN_SCRIPT",
     "BDPAN_APP_ROOT",
-    "BAIDU_OAUTH_ROOT"
+    "BAIDU_OAUTH_ROOT",
+    "BAIDU_CLIENT_ID",
+    "BAIDU_CLIENT_SECRET_FILE"
   ],
   "requiredMulti": [
     "BDPAN_CONFIG_DIR"
@@ -26,6 +28,8 @@
     "BDPAN_EXCHANGE_DIR": "本机文件交换目录",
     "BDPAN_APP_ROOT": "应用空间内的目录",
     "BAIDU_ACCESS_TOKEN_FILE": "开放平台 OAuth Token 文件",
-    "BAIDU_OAUTH_ROOT": "OAuth 可操作目录"
+    "BAIDU_OAUTH_ROOT": "OAuth 可操作目录",
+    "BAIDU_CLIENT_ID": "开放平台 Client ID",
+    "BAIDU_CLIENT_SECRET_FILE": "开放平台 Client Secret 文件"
   }
 }

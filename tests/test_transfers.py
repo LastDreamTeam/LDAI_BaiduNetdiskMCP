@@ -17,3 +17,21 @@ class Transfers(unittest.TestCase):
         with patch.object(server,"query",return_value=[{"isdir":1,"path":"/nested"},{"isdir":0,"path":"/a","size":8}]):
             result=server.baidu_directory_size("/",1)
             self.assertEqual(result["bytes"],8);self.assertFalse(result["complete"])
+
+    def test_oauth_reconnect(self):
+        import json
+        import baidu_oauth as oauth
+        with tempfile.TemporaryDirectory() as directory:
+            folder=Path(directory)
+            secret=folder/"application"
+            secret.write_text("fixture",encoding="utf8")
+            grant=folder/"grant"
+            grant.write_text("old grant",encoding="utf8")
+            session=dict(verification_url="https://openapi.baidu.com/device",interval=1,expires_in=120,device_code="device",user_code="code")
+            with patch.dict(os.environ,dict(BAIDU_CLIENT_ID="example",BAIDU_CLIENT_SECRET_FILE=str(secret),BAIDU_ACCESS_TOKEN_FILE=str(grant))),patch.object(oauth.time,"sleep"):
+                with patch.object(oauth,"request",side_effect=[session,{"error":"access_denied"}]):
+                    with self.assertRaises(ValueError):oauth.authorize(lambda url,code: None)
+                self.assertEqual(grant.read_text(),"old grant")
+                with patch.object(oauth,"request",side_effect=[session,{"error":"authorization_pending"},{"access_token":"new grant","scope":"netdisk"}]):
+                    oauth.authorize(lambda url,code: None)
+                self.assertEqual(json.loads(grant.read_text())["access_token"],"new grant")

@@ -148,6 +148,12 @@ def gui():
     def reconnect():
         entry=store()
         if not entry:return
+        if entry.get("env",{}).get("BAIDU_CLIENT_ID"):
+            env=account_env(entry)
+            if not env.get("BAIDU_ACCESS_TOKEN_FILE") or not env.get("BAIDU_CLIENT_SECRET_FILE"):
+                raise ValueError("请先设置 Token 文件路径和 Client Secret 文件。")
+            subprocess.Popen([sys.executable,str(ROOT/"baidu_oauth.py")],cwd=ROOT,env=env,creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
+            return
         if entry.get("command") and entry.get("reconnectArgs"):
             cmd=entry["reconnectArgs"]
             if not isinstance(cmd,list) or not cmd or not all(isinstance(v,str) for v in cmd):raise ValueError("无有效授权助手。")

@@ -21,6 +21,8 @@ def token_value():
         token = Path(filename).expanduser().read_text(encoding="utf-8-sig").strip()
     except OSError:
         raise ValueError("Cannot open BAIDU_ACCESS_TOKEN_FILE.") from None
+    if token.startswith("{"):
+        token=json.loads(token).get("access_token","")
     if not token:
         raise ValueError("Empty OAuth token file.")
     return token
