@@ -6,7 +6,7 @@ from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
 PUBLIC_HOSTS = {
-    "agent-plugins.org", "cursor.com", "fsf.org", "github.com", "www.gnu.org", "www.w3.org",
+    "agent-plugins.org", "cursor.com", "chatgpt.com", "developers.openai.com", "fsf.org", "github.com", "www.gnu.org", "www.w3.org",
     "openapi.baidu.com", "d.pcs.baidu.com", "pan.baidu.com", "yun.baidu.com", "hestiacp.com", "mailu.io", "www.yxtown.com",
     "yxtown.com", "files.pythonhosted.org",
 }

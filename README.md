@@ -65,3 +65,5 @@ MCP 入口为 `router.py`，需要 Python 3.11+。主机在本地保存账号配
 许可为 **AGPL-3.0-only**。[许可全文](LICENSE)
 
 开放平台账号可在管理窗口填写自己的 Client ID、Client Secret 文件路径和 Token 文件路径，点击「重新连接」后在百度官方页面输入设备码。成功后原子替换本机授权，失败保留旧授权。应用空间和开放平台的授权目录可分别设置。[百度官方授权接口](https://github.com/baidu-netdisk/baidu-drive-sdk-go/tree/main/baidudriver/api)
+
+[原生插件页多账号接入候选版：部署、覆盖范围与验收](native_account/README.md)

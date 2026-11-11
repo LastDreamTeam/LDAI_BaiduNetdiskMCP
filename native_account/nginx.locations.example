@@ -1,0 +1,82 @@
+# Example server{} locations. Check for an existing callback handler before use.
+location = /pan/mcp {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/authorize {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/register {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/token {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/consent {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/callback {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /pan/revoke {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /.well-known/oauth-protected-resource/pan/mcp {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
+location = /.well-known/oauth-authorization-server/pan {
+    access_log off;
+    proxy_http_version 1.1;
+    proxy_buffering off;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Connection "";
+    proxy_pass http://127.0.0.1:8201;
+}
