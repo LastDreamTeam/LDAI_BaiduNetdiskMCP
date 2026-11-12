@@ -29,6 +29,7 @@ async def test(native=False):
             return {'errno':0,'path':form['path'],'fs_id':42,'isdir':1}
         return {'errno':0,'uk':uid} if ep=='nas' else {'errno':0,'list':[{'path':params.get('dir','/')+'/item','size':3}]}
     raw_requests = []
+    enriched = set()
     async def baidu_endpoint(request):
         params=dict(request.url.params)
         assert request.method=="GET" and request.url.host=="pan.baidu.com" and request.url.path=="/xpan/oauth/get"
@@ -41,10 +42,17 @@ async def test(native=False):
                  "scope":scopes,"authorized_paths":["/"+who]}
         else:
             assert params["method"]=="refresh_token"
-            who=params["refresh_token"].removeprefix("refresh.")
+            who="second" if params["refresh_token"]=="rotated.first-enrichment" else params["refresh_token"].removeprefix("refresh.")
             raw={"access_token":"fixture."+who+".new","refresh_token":"rotated."+who,"expires_in":3600,
                  "scope":"nd_open_read","authorized_paths":["/"+who+"/narrow"]}
         raw_requests.append(params["method"])
+        if who == "second" and params["method"] == "token":
+            partial = {k: raw[k] for k in ("access_token","refresh_token","authorized_paths")}
+            return httpx.Response(200,json={"errno":0,"data":partial})
+        if who == "second" and params["method"] == "refresh_token" and who not in enriched:
+            enriched.add(who)
+            raw.update(access_token="fixture.second",refresh_token="rotated.first-enrichment",scope=["nd_open_read","nd_open_write"],authorized_paths=["/second"])
+            return httpx.Response(200,json={"errno":0,"data":raw})
         if who == "second":
             raw["scope"] = raw["scope"].split(",")
             return httpx.Response(200, json=raw)
@@ -115,7 +123,7 @@ async def test(native=False):
             async def available(token):return True
             with patch.object(mod,'httpx',mocked_http),patch.object(mod,'provider_request',lookup),patch.object(mod,'official_share_call',available):
                 await asyncio.gather(*(grant(who) for who in identities))
-            assert raw_requests.count('token')==3 and raw_requests.count('refresh_token')==3
+            assert raw_requests.count('token')==3 and raw_requests.count('refresh_token')==4
     print('PASS: browser DCR/PKCE, native directory token exchange, same-account connection isolation, read/write boundaries and refresh narrowing (simulated Baidu).')
 if __name__=='__main__':
     asyncio.run(test())

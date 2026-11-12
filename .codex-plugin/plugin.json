@@ -1,6 +1,6 @@
 {
   "name": "baidu-netdisk",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "通过 bdpan 和可选的开放平台 OAuth 查询、上传、下载和管理使用者自己的网盘文件。",
   "author": {
     "name": "LastDreamTeam"

@@ -113,22 +113,63 @@ class DirectoryOAuthClient:
         if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k]
                 for k in ("access_token", "refresh_token")):
             raise ValueError("Baidu did not return both credentials. Start a new connection.")
-        scopes = provider_scopes(data.get("scope"))
+        # Preserve the difference between an absent selection and an explicit empty one.
+        meta = {k: data.get(k, envelope.get(k)) for k in ("scope", "scopes", "expires_in", "authorized_paths")
+                if k in data or k in envelope}
+        raw_scopes = meta.get("scope", meta.get("scopes"))
+        if isinstance(raw_scopes, list) and all(isinstance(v, dict) for v in raw_scopes):
+            raw_scopes = [v.get("scope_code") for v in raw_scopes]
+        scopes = provider_scopes(raw_scopes)
+        paths = provider_paths(meta.get("authorized_paths"))
         try:
-            lifetime = int(data.get("expires_in", 0))
-        except (TypeError, ValueError):
+            lifetime = max(0, int(meta.get("expires_in", 0)))
+        except (ValueError, TypeError, OverflowError):
             lifetime = 0
-        if not scopes or lifetime <= 0:
-            raise ValueError("Baidu returned incomplete grant metadata. Start a new connection.")
-        return {"access_token": data["access_token"], "refresh_token": data["refresh_token"],
-                "scope": " ".join(scopes), "expires_in": lifetime, "token_type": "Bearer",
-                "authorized_paths": provider_paths(data.get("authorized_paths")), "_baidu_directory_flow": True}
+        logging.getLogger("uvicorn.error").info(
+            "Directory grant %s: scope_type=%s scope_count=%d expiry_present=%s paths_present=%s path_count=%d",
+            method, type(raw_scopes).__name__, len(scopes), bool(lifetime), "authorized_paths" in meta, len(paths))
+        result = {"access_token": data["access_token"], "refresh_token": data["refresh_token"],
+                  "scope": " ".join(scopes), "expires_in": lifetime, "token_type": "Bearer",
+                  "_baidu_directory_flow": True}
+        if "authorized_paths" in meta:
+            result["authorized_paths"] = paths
+        return result
+
+    @staticmethod
+    async def _finish(grant):
+        # Renew early if no TTL was supplied. The provider still validates its token on every request.
+        if not grant["expires_in"]:
+            grant["expires_in"] = 600
+        if not grant["scope"]:
+            roots = grant.get("authorized_paths", [])
+            if not roots:
+                raise ValueError("Baidu returned no verifiable directory or scope after refresh.")
+            await provider_request(grant["access_token"], "file",
+                                   {"method": "list", "dir": roots[0], "start": 0, "limit": 1})
+            # Separate proven file-read capability from the provider's reported scopes.
+            grant["_baidu_read_verified"] = True
+            grant["scope"] = "nd_open_read"
+        return grant
 
     async def fetch_token(self, *, code, redirect_uri, **kwargs):
-        return await self._request("token", {"code":code, "redirect_uri":redirect_uri})
+        initial = await self._request("token", {"code": code, "redirect_uri": redirect_uri})
+        if initial["scope"] and initial["expires_in"] and "authorized_paths" in initial:
+            return initial
+        # Redeem the one-time authorization code only once. The provider's refresh
+        # response can supply metadata omitted from the initial token envelope.
+        fresh = await self._request("refresh_token", {"refresh_token": initial["refresh_token"]})
+        if "authorized_paths" in initial:
+            fresh["authorized_paths"] = (intersect_roots(initial["authorized_paths"], fresh["authorized_paths"])
+                                         if "authorized_paths" in fresh else initial["authorized_paths"])
+        if initial["scope"] and fresh["scope"]:
+            fresh["scope"] = " ".join(sorted(set(initial["scope"].split()) & set(fresh["scope"].split())))
+        elif initial["scope"]:
+            fresh["scope"] = initial["scope"]
+        return await self._finish(fresh)
 
     async def refresh_token(self, *, refresh_token, **kwargs):
-        return await self._request("refresh_token", {"refresh_token":refresh_token})
+        fresh = await self._request("refresh_token", {"refresh_token": refresh_token})
+        return await self._finish(fresh)
 
 
 def intersect_roots(first, second):
@@ -166,7 +207,8 @@ def account_permissions(bound, read_policy, share_policy, *, directory_policy=No
     return {"read_roots":roots, "write_roots":writable, "share_roots":shareable,
             "authorization_source":"baidu_directory_oauth" if directory else "existing_connection",
             "provider_returned_directories":has_paths,
-            "provider_scopes":sorted(s for s in scopes if s in ("basic","netdisk") or re.fullmatch(r"nd_open_[a-z_]{1,48}",s))}
+            "read_verified_with_file_api": details.get("read_verified") is True,
+            "provider_scopes":sorted(s for s in scopes if not details.get("read_verified") and (s in ("basic","netdisk") or re.fullmatch(r"nd_open_[a-z_]{1,48}",s)))}
 
 
 class BaiduOAuthProxy(OAuthProxy):
@@ -182,6 +224,7 @@ class BaiduOAuthProxy(OAuthProxy):
         permissions = {
             "directory_flow": raw.get("_baidu_directory_flow") is True,
             "scopes": provider_scopes(raw.get("scope", "")),
+            "read_verified": raw.get("_baidu_read_verified") is True,
         }
         if "authorized_paths" in raw:
             permissions["paths"] = provider_paths(raw["authorized_paths"])
