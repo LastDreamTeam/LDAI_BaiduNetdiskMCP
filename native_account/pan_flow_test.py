@@ -14,6 +14,7 @@ from unittest.mock import patch
 import httpx
 from key_value.aio.stores.memory import MemoryStore
 import native_pan_server as mod
+from unittest.mock import AsyncMock
 
 async def test(native=False):
     origin='https://bridge.example.org'
@@ -125,6 +126,28 @@ async def test(native=False):
                 await asyncio.gather(*(grant(who) for who in identities))
             assert raw_requests.count('token')==3 and raw_requests.count('refresh_token')==4
     print('PASS: browser DCR/PKCE, native directory token exchange, same-account connection isolation, read/write boundaries and refresh narrowing (simulated Baidu).')
+async def test_empty_provider_grant():
+    client = mod.DirectoryOAuthClient("fixture", "fixture", lambda uid:["/apps/Example"] if uid=="42" else [])
+    tokens = {"scope":"", "authorized_paths":[], "expires_in":3600, "access_token":"fixture", "refresh_token":"fixture-refresh"}
+    async def lookup(token, ep, params):
+        assert token == "fixture"
+        if ep == "nas":
+            return {"uk":42}
+        assert params["dir"] == "/apps/Example"
+        return {"list":[]}
+    for accepted in (True, False):
+        with patch.object(mod, "provider_request", lookup if accepted else AsyncMock(return_value={"uk":100})):
+            grant = await client._finish(dict(tokens))
+        assert grant["scope"] == "baidu_verified_account" and grant["authorized_paths"] == []
+        assert grant.get("_verified_app_paths",[]) == (["/apps/Example"] if accepted else [])
+        from types import SimpleNamespace
+        bound = SimpleNamespace(claims={"profile":{"id":"42"},"baidu_grant":{
+            "directory_flow":True,"paths":[],"scopes":[grant["scope"]],"verified_app_paths":grant.get("_verified_app_paths",[])}})
+        access = mod.account_permissions(bound,lambda uid:["/"],lambda uid:["/"])
+        assert access["read_roots"] == grant.get("_verified_app_paths",[]) and not access["write_roots"] and not access["share_roots"]
+        assert access["provider_directory_count"] == 0 and not access["provider_scopes"]
+
 if __name__=='__main__':
+    asyncio.run(test_empty_provider_grant())
     asyncio.run(test())
     asyncio.run(test(native=True))

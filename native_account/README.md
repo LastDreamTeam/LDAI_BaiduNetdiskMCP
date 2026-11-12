@@ -9,7 +9,7 @@
 
 独立 Python 3.11+ 虚拟环境中执行 `python -m pip install -r native_account/requirements.txt`。设置 `MCP_PUBLIC_ORIGIN`、`OPENAI_REDIRECT_URI`、`BAIDU_APP_KEY_FILE`、`BAIDU_APP_SECRET_FILE`、`BAIDU_ACCOUNT_ROOTS_FILE`；可设 `MCP_LISTEN_PORT`（默认 8201）。用不接触现有登录记录的独立服务用户运行 `python native_account/native_pan_server.py`。私有文件只允许服务用户读取；让服务用户拥有独立、持久化的 home，并保护其 FastMCP 授权存储。服务只监听回环地址。
 
-账户策略文件使用 JSON。设置 `{"follow_directory_grants": true}` 后，新连接从百度的快速授权页取得本次选择的目录和实际权限，服务按每条连接分别执行。如果首次换令牌只返回凭据，服务会用本次新发的刷新令牌补取权限和目录，并保存轮换后的新令牌。过期时间缺失时，服务会提前刷新。未返回有效目录时，这条新连接无法访问文件。可添加按百度用户 UK 命名的键限制目录上限，也可用 `directory_share_limits` 针对指定用户进一步限定分享目录。例如 `{"follow_directory_grants":true,"100001":["/Example"],"directory_share_limits":{"100001":["/Example/Published"]}}`。示例编号应替换为部署者自己的账号编号。
+账户策略文件使用 JSON。设置 `{"follow_directory_grants": true}` 后，新连接从百度的快速授权页取得本次选择的目录和实际权限，服务按每条连接分别执行。如果首次换令牌只返回凭据，服务会用本次新发的刷新令牌补取权限和目录，并保存轮换后的新令牌。过期时间缺失时，服务会提前刷新。百度未返回有效目录时，连接仅保留账号身份。部署者可用 `app_fallback_roots` 为指定百度用户 UK 配置此前批准的 `/apps/<应用目录>`。只有新令牌实测可以读取的目录才作为只读备用范围，工具将来源标记为 `verified_app_workspace`。可添加按百度用户 UK 命名的键限制目录上限，也可用 `directory_share_limits` 针对指定用户进一步限定分享目录。例如 `{"follow_directory_grants":true,"100001":["/Example"],"directory_share_limits":{"100001":["/Example/Published"]}}`。示例编号应替换为部署者自己的账号编号。
 
 旧连接继续使用已经批准的读取目录，由用户 UK 对应的列表或 `default_roots` 提供。需要写入或分享时，分别用 `legacy_write_roots` 和 `share_roots` 按用户 UK 指定目录。读取整盘的旧授权不会自动获得整盘写入或分享。没有开启 `follow_directory_grants` 时，新连接选出的目录还受原有部署策略限制。
 

@@ -12,4 +12,4 @@ description: 通过 bdpan 和可选的开放平台 OAuth 查询、上传、下�
 
 云端优先使用当前所选账户的 baidu_search、baidu_list、baidu_share_capabilities。用户要分享具体文件时，使用已核对的 ID 和允许分享的目录创建链接，返回有效期和提取码；如结果不确定先查询原有分享，避免重复创建。
 
-需要更换目录或调整权限时，引导用户在本插件「管理」页面重新连接，核对百度展示的权限并在「可访问目录」选择文件夹。调用 baidu_share_capabilities 核对这条连接的 read_roots、write_roots 和 share_roots。分享服务状态为 unconfirmed 时仍可查看目录权限，可稍后重查分享能力。同一百度账号的不同连接可以有不同的目录。创建文件夹使用 baidu_create_directory。百度拒绝操作时，保留其权限结果，提醒用户核对所选目录和分享权限。
+需要更换目录或调整权限时，引导用户在本插件「管理」页面重新连接，核对百度展示的权限并在「可访问目录」选择文件夹。调用 baidu_share_capabilities 核对这条连接的 read_roots、write_roots 和 share_roots。分享服务状态为 unconfirmed 时仍可查看目录权限，可稍后重查分享能力。来源为 verified_app_workspace 时，百度未返回可核实的自选目录。仅使用 read_roots 中实测可读的应用目录，并向用户说明它是备用范围。同一百度账号的不同连接可以有不同的目录。创建文件夹使用 baidu_create_directory。百度拒绝操作时，保留其权限结果，提醒用户核对所选目录和分享权限。

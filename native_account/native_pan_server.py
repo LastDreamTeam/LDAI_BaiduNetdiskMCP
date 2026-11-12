@@ -86,7 +86,8 @@ def provider_paths(value):
 
 
 class DirectoryOAuthClient:
-    def __init__(self, key, secret):
+    def __init__(self, key, secret, fallback_roots=None):
+        self.fallback_roots = fallback_roots
         self.key = key
         self.secret = secret
 
@@ -135,30 +136,47 @@ class DirectoryOAuthClient:
             result["authorized_paths"] = paths
         return result
 
-    @staticmethod
-    async def _finish(grant):
+    async def _finish(self, grant):
         # Renew early if no TTL was supplied. The provider still validates its token on every request.
         if not grant["expires_in"]:
             grant["expires_in"] = 600
+        roots = grant.get("authorized_paths", [])
+        if not roots and self.fallback_roots is not None:
+            # Only a deployment-approved app workspace for the verified Baidu user
+            # can serve as a fallback. Check it using this exact new access token.
+            profile = await provider_request(grant["access_token"], "nas", {"method": "uinfo"})
+            uid = str(profile.get("uk", ""))
+            candidates = self.fallback_roots(uid) if re.fullmatch(r"[0-9]+", uid) else []
+            roots = list(roots)
+            for path in candidates:
+                try:
+                    listed = await provider_request(grant["access_token"], "file",
+                                                    {"method": "list", "dir": path, "start": 0, "limit": 1})
+                    allowed_rows(listed.get("list"), path)
+                except ValueError:
+                    continue
+                roots.append(path)
+            if roots:
+                grant["_verified_app_paths"] = roots.copy()
+                grant["authorized_paths"] = []
         if not grant["scope"]:
-            roots = grant.get("authorized_paths", [])
-            if not roots:
-                raise ValueError("Baidu returned no verifiable directory or scope after refresh.")
-            await provider_request(grant["access_token"], "file",
-                                   {"method": "list", "dir": roots[0], "start": 0, "limit": 1})
-            # Separate proven file-read capability from the provider's reported scopes.
-            grant["_baidu_read_verified"] = True
-            grant["scope"] = "nd_open_read"
+            if roots and not grant.get("_verified_app_paths"):
+                await provider_request(grant["access_token"], "file",
+                                       {"method": "list", "dir": roots[0], "start": 0, "limit": 1})
+            # This internal transport scope permits connecting the profile, even
+            # when file access is empty. It is never reported as a Baidu grant.
+            grant["scope"] = "baidu_verified_account"
+            grant["_baidu_read_verified"] = bool(roots)
         return grant
 
     async def fetch_token(self, *, code, redirect_uri, **kwargs):
         initial = await self._request("token", {"code": code, "redirect_uri": redirect_uri})
-        if initial["scope"] and initial["expires_in"] and "authorized_paths" in initial:
+        if initial["scope"] and initial["expires_in"] and initial.get("authorized_paths"):
             return initial
         # Redeem the one-time authorization code only once. The provider's refresh
         # response can supply metadata omitted from the initial token envelope.
         fresh = await self._request("refresh_token", {"refresh_token": initial["refresh_token"]})
-        if "authorized_paths" in initial:
+        if initial.get("authorized_paths"):
             fresh["authorized_paths"] = (intersect_roots(initial["authorized_paths"], fresh["authorized_paths"])
                                          if "authorized_paths" in fresh else initial["authorized_paths"])
         if initial["scope"] and fresh["scope"]:
@@ -194,10 +212,13 @@ def account_permissions(bound, read_policy, share_policy, *, directory_policy=No
         read_limit = read_policy(uid)
         share_limit = share_policy(uid)
     roots = intersect_roots(details.get("paths", []), read_limit) if has_paths or directory else read_limit
-    if directory and not ("nd_open_read" in scopes or "netdisk" in scopes):
+    fallback = details.get("verified_app_paths", []) if directory else []
+    if fallback:
+        roots = intersect_roots(fallback, read_limit)
+    if directory and not (fallback or details.get("read_verified") or "nd_open_read" in scopes or "netdisk" in scopes):
         roots = []
     if directory:
-        writable = roots if "nd_open_write" in scopes else []
+        writable = roots if not fallback and "nd_open_write" in scopes else []
         shareable = writable if share_limit is None else intersect_roots(writable, share_limit)
     else:
         # A legacy netdisk grant does not attest to broad writable directory rights.
@@ -205,8 +226,8 @@ def account_permissions(bound, read_policy, share_policy, *, directory_policy=No
                     if legacy_write_policy and "netdisk" in scopes else [])
         shareable = intersect_roots(roots, share_limit) if (not details or "netdisk" in scopes or "nd_open_write" in scopes) else []
     return {"read_roots":roots, "write_roots":writable, "share_roots":shareable,
-            "authorization_source":"baidu_directory_oauth" if directory else "existing_connection",
-            "provider_returned_directories":has_paths,
+            "authorization_source": ("verified_app_workspace" if fallback else "baidu_directory_oauth") if directory else "existing_connection",
+            "provider_returned_directories":has_paths, "provider_directory_count":len(details.get("paths", [])),
             "read_verified_with_file_api": details.get("read_verified") is True,
             "provider_scopes":sorted(s for s in scopes if not details.get("read_verified") and (s in ("basic","netdisk") or re.fullmatch(r"nd_open_[a-z_]{1,48}",s)))}
 
@@ -225,6 +246,7 @@ class BaiduOAuthProxy(OAuthProxy):
             "directory_flow": raw.get("_baidu_directory_flow") is True,
             "scopes": provider_scopes(raw.get("scope", "")),
             "read_verified": raw.get("_baidu_read_verified") is True,
+            "verified_app_paths": provider_paths(raw.get("_verified_app_paths", [])),
         }
         if "authorized_paths" in raw:
             permissions["paths"] = provider_paths(raw["authorized_paths"])
@@ -256,7 +278,7 @@ class BaiduOAuthProxy(OAuthProxy):
     @asynccontextmanager
     async def _upstream_oauth_client(self):
         if DIRECTORY_FLOW.get():
-            yield DirectoryOAuthClient(self._upstream_client_id, self._upstream_client_secret.get_secret_value())
+            yield DirectoryOAuthClient(self._upstream_client_id, self._upstream_client_secret.get_secret_value(), self.fallback_roots)
         else:
             async with super()._upstream_oauth_client() as client:
                 yield client
@@ -313,7 +335,7 @@ class BaiduOAuthProxy(OAuthProxy):
 
     def _translate_scopes_from_idp(self, scopes):
         granted = set(" ".join(scopes).replace(",", " ").split())
-        return [READ_SCOPE] if granted.intersection({READ_SCOPE,"nd_open_read"}) else []
+        return [READ_SCOPE] if granted.intersection({READ_SCOPE,"nd_open_read","baidu_verified_account"}) else []
 
 
 class BaiduTokenVerifier(TokenVerifier):
@@ -525,6 +547,11 @@ def build_server(public_origin: str, redirect_uri: str, app_key: str, app_secret
                       token_endpoint_auth_method="client_secret_post", enable_cimd=False,
                       extra_authorize_params={"scope":"basic,netdisk"},
                       require_authorization_consent=True)
+    def fallback_roots(uid):
+        settings = json.loads(policy.read_text(encoding="utf-8-sig"))
+        configured = provider_paths(settings.get("app_fallback_roots", {}).get(uid, []))
+        return [p for p in configured if p.startswith("/apps/") and len(p.split("/")) >= 3]
+    auth.fallback_roots = fallback_roots
     auth.openai_callback = redirect_uri
     server = FastMCP("Baidu Netdisk", auth=auth)
     def permissions(bound):
