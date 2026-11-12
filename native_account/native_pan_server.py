@@ -2,9 +2,11 @@
 """Baidu account connection for OpenAI clients. Use one upstream grant per request."""
 import json
 import logging
+import re
+import secrets
 import os
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from starlette.datastructures import MutableHeaders
 from starlette.requests import Request
@@ -176,13 +178,100 @@ def register_read_tools(server, grant=current_grant, lookup=None, roots=None):
             raise ValueError("Directory is outside this account's allowed roots.")
         result = await (lookup or provider_request)(bound.token, "file", {"method": "list", "dir": path, "start": start, "limit": limit})
         items = result.get("list")
-        if not isinstance(items, list):
-            raise ValueError("Unexpected Baidu directory response")
-        if any(not isinstance(row,dict) or not isinstance(row.get("path"),str)
-               or not within(checked_path(row["path"]), path) for row in items):
-            raise ValueError("Unexpected file path in Baidu response.")
-        return {"items": [{k: item[k] for k in ("fs_id","path","size","isdir","server_mtime") if k in item}
-                          for item in items], "start": start}
+        return {"items": allowed_rows(items, path), "start": start}
+
+
+def allowed_rows(items, path):
+    if not isinstance(items, list) or any(not isinstance(item, dict) or
+            not isinstance(item.get("path"), str) or not within(checked_path(item["path"]), path)
+            for item in items):
+        raise ValueError("Unexpected file path in Baidu response.")
+    return [{k: item[k] for k in ("fs_id","path","size","isdir","server_mtime") if k in item} for item in items]
+
+
+async def official_share_call(token, args=None):
+    """Use Baidu's hosted MCP and its documented share tool. Never log a credential-bearing URL."""
+    import asyncio
+    from mcp import ClientSession
+    from mcp.client.sse import sse_client
+    logging.getLogger("mcp.client.sse").setLevel(logging.CRITICAL)
+    url = "https://mcp-pan.baidu.com/sse?" + urlencode({"access_token":token})
+    try:
+        async with asyncio.timeout(30):
+            async with sse_client(url, timeout=8, sse_read_timeout=15) as (reader, writer):
+                async with ClientSession(reader, writer) as session:
+                    await session.initialize()
+                    if args is None:
+                        tools = await session.list_tools()
+                        return any(t.name == "file_sharelink_set" for t in tools.tools)
+                    reply = await session.call_tool("file_sharelink_set", args)
+                    if reply.isError:
+                        raise ValueError()
+                    value = reply.structuredContent
+                    if value is None:
+                        texts = [p.text for p in reply.content if p.type == "text"]
+                        value = json.loads(texts[0]) if len(texts) == 1 else None
+                    if isinstance(value, dict) and isinstance(value.get("data"), dict):
+                        value = value["data"]
+                    if not isinstance(value, dict):
+                        raise ValueError()
+                    link = value.get("link") or value.get("short_url")
+                    target = urlsplit(link or "")
+                    if target.scheme != "https" or target.netloc != "pan.baidu.com" or not target.path.startswith("/s/"):
+                        raise ValueError()
+                    return {"link":link,"pwd":args["pwd"],"period":args["period"]}
+    except Exception:
+        raise ValueError("Baidu MCP could not confirm this request. For creation, check the account's existing shares before retrying.") from None
+
+
+def sharing_roots(policy, uid):
+    config = json.loads(policy.read_text(encoding="utf-8-sig"))
+    entries = config.get("share_roots", {})
+    values = entries.get(str(uid), []) if isinstance(entries, dict) else []
+    if not isinstance(values, list) or not all(isinstance(x, str) for x in values):
+        raise ValueError("Invalid share directory policy.")
+    return [checked_path(x) for x in values]
+
+
+def register_cloud_tools(server, roots, shares, grant=current_grant, lookup=None, share_gateway=None):
+    @server.tool(name="baidu_search", annotations={"readOnlyHint":True,"destructiveHint":False})
+    async def search(keyword: Annotated[str,Field(min_length=1,max_length=255)], path: str="/",
+                     page: Annotated[int,Field(ge=1)]=1, limit: Annotated[int,Field(ge=1,le=100)]=30) -> dict:
+        """Search filenames in an authorized directory of the selected account, including subdirectories."""
+        bound=grant()
+        base=checked_path(path)
+        if not keyword.strip() or not any(within(base,r) for r in roots(bound.claims["profile"]["id"])):
+            raise ValueError("Choose a keyword and an authorized search directory.")
+        result=await (lookup or provider_request)(bound.token,"file",{"method":"search","dir":base,"key":keyword,"recursion":1,"page":page,"num":limit})
+        return {"items":allowed_rows(result.get("list"),base),"page":page,"limit":limit,"has_more":bool(result.get("has_more",False))}
+
+    @server.tool(name="baidu_share_capabilities", annotations={"readOnlyHint":True,"destructiveHint":False})
+    async def capabilities() -> dict:
+        """Check whether Baidu advertises link creation to this connection and show its permitted sharing directories."""
+        bound=grant();uid=bound.claims["profile"]["id"]
+        return {"provider_tool_available":await (share_gateway or official_share_call)(bound.token),
+                "read_roots":roots(uid),"share_roots":shares(uid)}
+
+    @server.tool(name="baidu_create_share", annotations={"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True})
+    async def create_share(file_ids: Annotated[list[str],Field(min_length=1,max_length=100)],
+                           days: Literal[1,7,30]=7, extraction_code: Annotated[str,Field(pattern="^[a-z0-9]{4}$")]|None=None) -> dict:
+        """Create a time-limited sharing link for explicitly selected files. Anyone with the link and code can access them."""
+        bound=grant();uid=bound.claims["profile"]["id"]
+        reading,sharing=roots(uid),shares(uid)
+        if not sharing:raise ValueError("Sharing has not been enabled for this account.")
+        if any(not re.fullmatch(r"[1-9][0-9]{0,19}",v) for v in file_ids) or len(set(file_ids))!=len(file_ids):
+            raise ValueError("Supply unique decimal file identifiers.")
+        result=await (lookup or provider_request)(bound.token,"multimedia",{"method":"filemetas","fsids":json.dumps([int(v) for v in file_ids])})
+        items=result.get("list")
+        if not isinstance(items,list) or not all(isinstance(x,dict) for x in items) or {str(x.get("fs_id")) for x in items}!=set(file_ids):
+            raise ValueError("Baidu could not verify every file in this account.")
+        for item in items:
+            path=checked_path(item.get("path",""))
+            if not any(within(path,r) for r in reading) or not any(within(path,r) for r in sharing):
+                raise ValueError("The selected file is outside the allowed sharing directories.")
+        pwd=extraction_code or "".join(secrets.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(4))
+        return await (share_gateway or official_share_call)(bound.token,{"fsid_list":json.dumps(file_ids),"period":days,"pwd":pwd})
+
 
 
 def build_server(public_origin: str, redirect_uri: str, app_key: str, app_secret: str, policy: Path, *, storage=None):
@@ -209,6 +298,7 @@ def build_server(public_origin: str, redirect_uri: str, app_key: str, app_secret
     auth.openai_callback = redirect_uri
     server = FastMCP("Baidu Netdisk", auth=auth)
     register_read_tools(server, roots=lambda uid: read_roots(policy, uid))
+    register_cloud_tools(server, lambda uid: read_roots(policy, uid), lambda uid: sharing_roots(policy, uid))
     return server
 
 
