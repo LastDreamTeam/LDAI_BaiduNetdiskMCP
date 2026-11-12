@@ -18,3 +18,5 @@
 [OpenAI 原生多账号说明](https://developers.openai.com/plugins/build/auth#support-multiple-accounts) · [百度官方 MCP](https://github.com/baidu-netdisk/mcp)
 
 平台成功登记后，从 OpenAI 实际发现结果复制本服务的 App ID，再运行 `python native_account/prepare_app_binding.py <解包的当前私有插件> <已核实的AppID> <全新的私有目录>`，生成三份待审核的清单。此工具不上传、不替换现行插件，不会将旧 stdio 工具自动转成按账号路由。保留原 ZIP 作为回退；旧工具与原生工具容易混淆时，不应同时展示同名工具。先用平台测试连接完成双账号验收，并确定每个操作走选中账号，再对原插件 ID 发布。不要将生成的 App ID 或依赖清单提交到公共仓库。
+
+如需在私有插件内预配置远程 MCP 地址及浏览器 OAuth，可使用 `package_remote_oauth.py`。输入现有私有插件文件内容映射、已验证的 HTTPS URL、升版号和源提交，输出上传到原插件的更新包，保留既有 stdio。平台可从远程声明解析连接；若已有 OpenAI App 依赖，可选用前述 App ID 绑定。运行 `--help` 查看参数。通用仓库只保存生成器，实际地址保存在私有部署。
