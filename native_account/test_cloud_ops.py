@@ -1,7 +1,7 @@
 import asyncio,json,secrets
 from fastmcp import Client,FastMCP
 from fastmcp.server.auth import AccessToken
-from native_pan_server import register_cloud_tools
+from native_pan_server import register_cloud_tools, ShareServiceUnavailable
 async def test():
  from native_pan_server import account_permissions, provider_paths
  assert provider_paths(["/ok","../invalid"])==[]
@@ -26,9 +26,12 @@ async def test():
     return {'list':[{'fs_id':1,'path':root+'/document','size':20,'private':'omit'}], 'has_more':0}
    ids=json.loads(params['fsids'])
    return {'list':[{'fs_id':i,'path':(root if i==1 else '/elsewhere')+'/document'} for i in ids]}
+  available=True
   async def gateway(t,args=None):
    assert t==token.token
-   if args is None:return True
+   if args is None:
+    if available is None:raise ShareServiceUnavailable("fixture")
+    return available
    assert len(args['pwd'])==4 and args['period']==7 and json.loads(args['fsid_list'])==['1']
    used.append(args);return {'link':'https://pan.baidu.com/s/example','pwd':args['pwd'],'period':7}
   server=FastMCP('Fixture')
@@ -38,7 +41,12 @@ async def test():
    assert row.structured_content['items']==[{'fs_id':1,'path':root+'/document','size':20}]
    assert (await c.call_tool('baidu_search',{'keyword':'doc','path':'/'},raise_on_error=False)).is_error
    caps=(await c.call_tool('baidu_share_capabilities',{})).structured_content
-   assert caps['provider_tool_available']
+   assert caps['provider_tool_available'] and caps['provider_status']=='checked'
+   for available in (None,False):
+    degraded=(await c.call_tool('baidu_share_capabilities',{})).structured_content
+    assert degraded['provider_tool_available'] is available and degraded['read_roots']==caps['read_roots'] and degraded['share_roots']==caps['share_roots']
+    assert degraded['provider_status']==('unconfirmed' if available is None else 'checked')
+   available=True
    for ids in (['2'],['1','2'],['1','1'],['x']):
     assert (await c.call_tool('baidu_create_share',{'file_ids':ids},raise_on_error=False)).is_error
    result=await c.call_tool('baidu_create_share',{'file_ids':['1']},raise_on_error=False)

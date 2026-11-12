@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "baidu-netdisk",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "通过 bdpan 和可选的开放平台 OAuth 查询、上传、下载和管理使用者自己的网盘文件。",
   "author": {
     "name": "LastDreamTeam"

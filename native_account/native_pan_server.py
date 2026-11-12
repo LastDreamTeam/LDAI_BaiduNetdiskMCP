@@ -340,6 +340,10 @@ def allowed_rows(items, path):
     return [{k: item[k] for k in ("fs_id","path","size","isdir","server_mtime") if k in item} for item in items]
 
 
+class ShareServiceUnavailable(ValueError):
+    """Baidu did not confirm the share request or tool listing."""
+
+
 async def official_share_call(token, args=None):
     """Use Baidu's hosted MCP and its documented share tool. Never log a credential-bearing URL."""
     import asyncio
@@ -372,7 +376,7 @@ async def official_share_call(token, args=None):
                         raise ValueError()
                     return {"link":link,"pwd":args["pwd"],"period":args["period"]}
     except Exception:
-        raise ValueError("Baidu MCP could not confirm this request. For creation, check the account's existing shares before retrying.") from None
+        raise ShareServiceUnavailable("Baidu MCP could not confirm this request. For creation, check the account's existing shares before retrying.") from None
 
 
 def register_cloud_tools(server, roots, shares, grant=current_grant, lookup=None, share_gateway=None, permissions=None):
@@ -410,7 +414,13 @@ def register_cloud_tools(server, roots, shares, grant=current_grant, lookup=None
     async def capabilities() -> dict:
         """Check whether Baidu advertises link creation to this connection and show its permitted sharing directories."""
         bound=grant()
-        return {**permissions(bound), "provider_tool_available":await (share_gateway or official_share_call)(bound.token)}
+        access = permissions(bound)
+        try:
+            available = await (share_gateway or official_share_call)(bound.token)
+        except ShareServiceUnavailable:
+            # A catalog timeout does not revoke the user's directory grant.
+            return {**access, "provider_tool_available": None, "provider_status": "unconfirmed"}
+        return {**access, "provider_tool_available": available, "provider_status": "checked"}
 
     @server.tool(name="baidu_create_share", annotations={"readOnlyHint":False,"destructiveHint":False,"idempotentHint":False,"openWorldHint":True})
     async def create_share(file_ids: Annotated[list[str],Field(min_length=1,max_length=100)],
