@@ -3,6 +3,19 @@ from fastmcp import Client,FastMCP
 from fastmcp.server.auth import AccessToken
 from native_pan_server import register_cloud_tools
 async def test():
+ from native_pan_server import account_permissions, provider_paths
+ assert provider_paths(["/ok","../invalid"])==[]
+ def legacy(grant):
+  t=AccessToken(token="fixture",client_id="test",scopes=["netdisk"],claims={"profile":{"id":"1"},"baidu_grant":grant})
+  return account_permissions(t,lambda uid:["/"],lambda uid:["/apps/demo"],legacy_write_policy=lambda uid:["/apps/demo"])
+ assert legacy({"scopes":["netdisk"]})["share_roots"]==["/apps/demo"]
+ assert legacy({"scopes":["netdisk"]})["write_roots"]==["/apps/demo"]
+ assert legacy({"scopes":["netdisk"],"paths":["/photos"]})["read_roots"]==["/photos"]
+ assert not legacy({"scopes":["netdisk"],"paths":["/photos"]})["share_roots"]
+ assert not legacy({"scopes":["netdisk"],"paths":[]})["read_roots"]
+ assert not legacy({"scopes":["nd_open_read"],"paths":["/apps/demo"]})["share_roots"]
+ assert not legacy({"scopes":["nd_open_read","nd_open_write"],"directory_flow":True})["read_roots"]
+
  for user in ('100001','100002'):
   root='/'+user
   token=AccessToken(token='sample-'+user,client_id='example',scopes=['netdisk'],claims={'profile':{'id':user}})

@@ -21,22 +21,39 @@ async def test(native=False):
     web_callback = callback
     if native:
         callback = "http://127.0.0.1:54053/callback"
-    identities={'first':'100001','second':'100002'}
-    async def lookup(token,ep,params):
-        uid=identities[token.removeprefix('fixture.')]
-        return {'errno':0,'uk':uid} if ep=='nas' else {'errno':0,'list':[{'path':'/'+uid,'size':3}]}
-    class Upstream:
-        async def fetch_token(self,**kw):
-            who=kw['code']
-            assert kw['redirect_uri']==origin+'/pan/callback' and who in identities
-            return {'access_token':'fixture.'+who,'refresh_token':'refresh.'+who,'expires_in':3600,'token_type':'Bearer','scope':'basic,netdisk'}
-    @asynccontextmanager
-    async def provider():
-        yield Upstream()
+    identities={'first':'100001','second':'100002','same-owner-readonly':'100001'}
+    async def lookup(token,ep,params,*,form=None):
+        uid=identities[token.removeprefix('fixture.').removesuffix('.new')]
+        if form is not None:
+            assert params['method']=='create' and form['rtype']=='0'
+            return {'errno':0,'path':form['path'],'fs_id':42,'isdir':1}
+        return {'errno':0,'uk':uid} if ep=='nas' else {'errno':0,'list':[{'path':params.get('dir','/')+'/item','size':3}]}
+    raw_requests = []
+    async def baidu_endpoint(request):
+        params=dict(request.url.params)
+        assert request.method=="GET" and request.url.host=="pan.baidu.com" and request.url.path=="/xpan/oauth/get"
+        assert params["client_id"]=="fixture-client" and params["client_secret"]==app_secret
+        if params["method"]=="token":
+            who=params["code"]
+            assert params["redirect_uri"]==origin+"/pan/callback"
+            scopes="nd_open_read" if who=="same-owner-readonly" else "nd_open_read,nd_open_write"
+            raw={"access_token":"fixture."+who,"refresh_token":"refresh."+who,"expires_in":3600,
+                 "scope":scopes,"authorized_paths":["/"+who]}
+        else:
+            assert params["method"]=="refresh_token"
+            who=params["refresh_token"].removeprefix("refresh.")
+            raw={"access_token":"fixture."+who+".new","refresh_token":"rotated."+who,"expires_in":3600,
+                 "scope":"nd_open_read","authorized_paths":["/"+who+"/narrow"]}
+        raw_requests.append(params["method"])
+        return httpx.Response(200,json={"errno":0,"data":raw})
+    from types import SimpleNamespace
+    upstream_http=httpx.MockTransport(baidu_endpoint)
+    mocked_http=SimpleNamespace(AsyncClient=lambda **kw:httpx.AsyncClient(transport=upstream_http,**kw), HTTPError=httpx.HTTPError)
+    app_secret=secrets.token_urlsafe(32)
     with tempfile.TemporaryDirectory() as folder:
         policy=Path(folder)/'roots.json'
-        policy.write_text(json.dumps({v:['/'] for v in identities.values()}),encoding='utf8')
-        server=mod.build_server(origin,web_callback,'fixture-client',secrets.token_urlsafe(32),policy,storage=MemoryStore())
+        policy.write_text(json.dumps({'default_roots':['/example'], 'follow_directory_grants':True}),encoding='utf8')
+        server=mod.build_server(origin,web_callback,'fixture-client',app_secret,policy,storage=MemoryStore())
         server.auth._token_validator.lookup=lookup
         app=mod.http_app(server)
         transport=httpx.ASGITransport(app=app)
@@ -59,8 +76,8 @@ async def test(native=False):
                     agreed=await c.post('/pan/consent',data={'txn_id':txn,'action':'approve','csrf_token':m[1]})
                     assert agreed.is_redirect,('consent submit',agreed.status_code)
                     target=urlsplit(agreed.headers['location']); up=parse_qs(target.query)
-                    assert up['state'][0].startswith('ldpan1.')
-                    assert target.hostname=='openapi.baidu.com' and up['scope']==['basic,netdisk'] and up['redirect_uri']==[origin+'/pan/callback']
+                    assert up['state'][0].startswith('ldpan1.directory_v2_')
+                    assert target.hostname=='pan.baidu.com' and target.path=='/union/oauth/authorize' and up['scope']==['nd_open_read,nd_open_write'] and up['redirect_uri']==[origin+'/pan/callback']
                     done=await c.get('/pan/callback',params={'state':up['state'][0],'code':who})
                     assert done.is_redirect,('callback',done.status_code)
                     reply=urlsplit(done.headers['location']); params=parse_qs(reply.query)
@@ -69,16 +86,32 @@ async def test(native=False):
                     assert response.status_code==200,('token',response.status_code,response.text[:160])
                     token=response.json()['access_token']
                     assert token!='fixture.'+who
-                    for name in ('baidu_profile','baidu_list'):
-                        r=await c.post('/pan/mcp',headers={'Authorization':'Bearer '+token,'Accept':'application/json, text/event-stream'},
-                           json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':{}}})
-                        assert r.status_code==200,('mcp',r.status_code)
-                        result=r.json()['result'];assert not result.get('isError')
-                        data=result['structuredContent']
-                        assert (data['id'] if name=='baidu_profile' else data['items'][0]['path'].strip('/'))==identities[who]
-            with patch.object(server.auth,'_upstream_oauth_client',provider),patch.object(mod,'provider_request',lookup):
+                    async def call(t,name,args):
+                        r=await c.post('/pan/mcp',headers={'Authorization':'Bearer '+t,'Accept':'application/json, text/event-stream'},
+                            json={'jsonrpc':'2.0','id':1,'method':'tools/call','params':{'name':name,'arguments':args}})
+                        assert r.status_code==200,(name,r.status_code)
+                        return r.json()['result']
+                    profile=await call(token,'baidu_profile',{})
+                    assert profile['structuredContent']['id']==identities[who]
+                    caps=(await call(token,'baidu_share_capabilities',{}))['structuredContent']
+                    assert caps['read_roots']==['/'+who]
+                    assert caps['share_roots']==([] if who=='same-owner-readonly' else ['/'+who])
+                    assert (await call(token,'baidu_list',{'path':'/'}))['isError']
+                    assert not (await call(token,'baidu_list',{'path':'/'+who})).get('isError')
+                    assert (await call(token,'baidu_create_directory',{'path':'/outside/new'}))['isError']
+                    created=await call(token,'baidu_create_directory',{'path':'/'+who+'/new'})
+                    assert bool(created.get('isError'))==(who=='same-owner-readonly')
+                    refreshed=await c.post('/pan/token',data={'grant_type':'refresh_token','refresh_token':response.json()['refresh_token'],'client_id':cid,'resource':origin+'/pan/mcp'})
+                    assert refreshed.status_code==200,refreshed.status_code
+                    newer=refreshed.json()['access_token']
+                    caps=(await call(newer,'baidu_share_capabilities',{}))['structuredContent']
+                    assert caps['read_roots']==['/'+who+'/narrow'] and caps['share_roots']==[]
+                    assert (await call(token,'baidu_list',{'path':'/'+who}))['isError']
+            async def available(token):return True
+            with patch.object(mod,'httpx',mocked_http),patch.object(mod,'provider_request',lookup),patch.object(mod,'official_share_call',available):
                 await asyncio.gather(*(grant(who) for who in identities))
-    print('PASS: two full DCR/consent/callback/S256 token flows, separate accounts through signed MCP tokens; simulated Baidu responses.')
+            assert raw_requests.count('token')==3 and raw_requests.count('refresh_token')==3
+    print('PASS: browser DCR/PKCE, native directory token exchange, same-account connection isolation, read/write boundaries and refresh narrowing (simulated Baidu).')
 if __name__=='__main__':
     asyncio.run(test())
     asyncio.run(test(native=True))
