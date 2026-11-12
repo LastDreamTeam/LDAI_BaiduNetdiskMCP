@@ -1,6 +1,6 @@
 {
   "id": "baidu-netdisk",
-  "version": "0.3.0",
+  "version": "0.4.2",
   "repository": "https://github.com/LastDreamTeam/LDAI_BaiduNetdiskMCP",
   "runtime": "python",
   "toolPrefixes": [
