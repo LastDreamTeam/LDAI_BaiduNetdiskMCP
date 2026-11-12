@@ -15,9 +15,12 @@ import httpx
 from key_value.aio.stores.memory import MemoryStore
 import native_pan_server as mod
 
-async def test():
+async def test(native=False):
     origin='https://bridge.example.org'
     callback='https://chatgpt.com/connector_platform_oauth_redirect'
+    web_callback = callback
+    if native:
+        callback = "http://127.0.0.1:54053/callback"
     identities={'first':'100001','second':'100002'}
     async def lookup(token,ep,params):
         uid=identities[token.removeprefix('fixture.')]
@@ -33,7 +36,7 @@ async def test():
     with tempfile.TemporaryDirectory() as folder:
         policy=Path(folder)/'roots.json'
         policy.write_text(json.dumps({v:['/'] for v in identities.values()}),encoding='utf8')
-        server=mod.build_server(origin,callback,'fixture-client',secrets.token_urlsafe(32),policy,storage=MemoryStore())
+        server=mod.build_server(origin,web_callback,'fixture-client',secrets.token_urlsafe(32),policy,storage=MemoryStore())
         server.auth._token_validator.lookup=lookup
         app=mod.http_app(server)
         transport=httpx.ASGITransport(app=app)
@@ -61,7 +64,7 @@ async def test():
                     done=await c.get('/pan/callback',params={'state':up['state'][0],'code':who})
                     assert done.is_redirect,('callback',done.status_code)
                     reply=urlsplit(done.headers['location']); params=parse_qs(reply.query)
-                    assert reply.hostname=='chatgpt.com' and params['state']==[state] and params['iss']==[origin+'/pan']
+                    assert reply[:3] == urlsplit(callback)[:3] and params['state']==[state] and params['iss']==[origin+'/pan']
                     response=await c.post('/pan/token',data={'code':params['code'][0],'client_id':cid,'grant_type':'authorization_code','redirect_uri':callback,'code_verifier':verifier,'resource':origin+'/pan/mcp'})
                     assert response.status_code==200,('token',response.status_code,response.text[:160])
                     token=response.json()['access_token']
@@ -76,4 +79,6 @@ async def test():
             with patch.object(server.auth,'_upstream_oauth_client',provider),patch.object(mod,'provider_request',lookup):
                 await asyncio.gather(*(grant(who) for who in identities))
     print('PASS: two full DCR/consent/callback/S256 token flows, separate accounts through signed MCP tokens; simulated Baidu responses.')
-if __name__=='__main__':asyncio.run(test())
+if __name__=='__main__':
+    asyncio.run(test())
+    asyncio.run(test(native=True))

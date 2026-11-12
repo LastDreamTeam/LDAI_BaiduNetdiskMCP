@@ -17,6 +17,7 @@ from starlette.routing import Mount
 from fastmcp import FastMCP
 from fastmcp.server.auth import AccessToken, OAuthProxy, TokenVerifier
 from fastmcp.server.dependencies import get_access_token
+from mcp.server.auth.provider import RegistrationError
 from pydantic import Field
 
 # Baidu specifies access_token in the URL. Exclude URL-bearing HTTP client logs.
@@ -45,7 +46,34 @@ async def provider_request(token: str, endpoint: str, params: dict) -> dict:
     return result
 
 
+def desktop_callback(uri: str) -> bool:
+    """Codex listens on a random unprivileged local port for the OAuth redirect."""
+    try:
+        parsed = urlsplit(uri)
+        port = parsed.port
+    except ValueError:
+        return False
+    return (port is not None and 1024 <= port <= 65535
+            and uri == f"http://127.0.0.1:{port}/callback")
+
+
 class BaiduOAuthProxy(OAuthProxy):
+    async def register_client(self, client_info):
+        uris = [str(uri) for uri in (client_info.redirect_uris or [])]
+        if not uris or any(uri != self.openai_callback and not desktop_callback(uri) for uri in uris):
+            raise RegistrationError("invalid_redirect_uri", "Unsupported client callback.")
+        return await super().register_client(client_info)
+
+    async def get_client(self, client_id):
+        client = await super().get_client(client_id)
+        if client is not None:
+            # Reuse only the callback addresses registered by this specific client.
+            client.allowed_redirect_uri_patterns = [
+                str(uri) for uri in (client.redirect_uris or [])
+                if str(uri) == self.openai_callback or desktop_callback(str(uri))
+            ]
+        return client
+
     # Only our transactions use this state prefix. Existing users of the same
     # Baidu callback must continue through the original web application.
     def _build_upstream_authorize_url(self, txn_id, transaction):
@@ -173,7 +201,7 @@ def build_server(public_origin: str, redirect_uri: str, app_key: str, app_secret
                       upstream_authorization_endpoint="https://openapi.baidu.com/oauth/2.0/authorize",
                       upstream_token_endpoint="https://openapi.baidu.com/oauth/2.0/token",
                       upstream_client_id=app_key, upstream_client_secret=app_secret,
-                      allowed_client_redirect_uris=[redirect_uri], valid_scopes=[READ_SCOPE],
+                      allowed_client_redirect_uris=[redirect_uri, "http://127.0.0.1:*/callback"], valid_scopes=[READ_SCOPE],
                       client_storage=storage, token_verifier=BaiduTokenVerifier(app_key), forward_pkce=False, forward_resource=False,
                       token_endpoint_auth_method="client_secret_post", enable_cimd=False,
                       extra_authorize_params={"scope":"basic,netdisk"},
@@ -205,7 +233,9 @@ class OAuthIssuerResponse:
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
                 target = urlsplit(headers.get("location", ""))
-                if message["status"] in (302,303,307,308) and target[:3] == self.callback[:3]:
+                callback_uri = urlunsplit(target._replace(query="", fragment=""))
+                trusted = target[:3] == self.callback[:3] or desktop_callback(callback_uri)
+                if message["status"] in (302,303,307,308) and trusted:
                     fields = parse_qsl(target.query, keep_blank_values=True)
                     if any(key in ("code","error") for key, _ in fields):
                         fields = [(key, val) for key, val in fields if key != "iss"]
