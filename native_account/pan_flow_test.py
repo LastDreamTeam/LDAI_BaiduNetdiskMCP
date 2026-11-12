@@ -45,7 +45,10 @@ async def test(native=False):
             raw={"access_token":"fixture."+who+".new","refresh_token":"rotated."+who,"expires_in":3600,
                  "scope":"nd_open_read","authorized_paths":["/"+who+"/narrow"]}
         raw_requests.append(params["method"])
-        return httpx.Response(200,json={"errno":0,"data":raw})
+        if who == "second":
+            raw["scope"] = raw["scope"].split(",")
+            return httpx.Response(200, json=raw)
+        return httpx.Response(200,json={"errno":"0" if who == "same-owner-readonly" else 0,"data":raw})
     from types import SimpleNamespace
     upstream_http=httpx.MockTransport(baidu_endpoint)
     mocked_http=SimpleNamespace(AsyncClient=lambda **kw:httpx.AsyncClient(transport=upstream_http,**kw), HTTPError=httpx.HTTPError)
@@ -76,6 +79,8 @@ async def test(native=False):
                     agreed=await c.post('/pan/consent',data={'txn_id':txn,'action':'approve','csrf_token':m[1]})
                     assert agreed.is_redirect,('consent submit',agreed.status_code)
                     target=urlsplit(agreed.headers['location']); up=parse_qs(target.query)
+                    assert up['show_dir']==['1'] and up['response_type']==['code']
+                    assert 'client_secret' not in up
                     assert up['state'][0].startswith('ldpan1.directory_v2_')
                     assert target.hostname=='pan.baidu.com' and target.path=='/union/oauth/authorize' and up['scope']==['nd_open_read,nd_open_write'] and up['redirect_uri']==[origin+'/pan/callback']
                     done=await c.get('/pan/callback',params={'state':up['state'][0],'code':who})

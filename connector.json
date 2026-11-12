@@ -1,6 +1,6 @@
 {
   "id": "baidu-netdisk",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "repository": "https://github.com/LastDreamTeam/LDAI_BaiduNetdiskMCP",
   "runtime": "python",
   "toolPrefixes": [
@@ -20,7 +20,7 @@
   "requiredMulti": [
     "BDPAN_CONFIG_DIR"
   ],
-  "title": "百度网盘",
+  "title": "Baidu Netdisk",
   "managerFields": {
     "BDPAN_BIN": "bdpan 程序",
     "BDPAN_LOGIN_SCRIPT": "官方登录脚本",

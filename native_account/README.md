@@ -13,7 +13,7 @@
 
 旧连接继续使用已经批准的读取目录，由用户 UK 对应的列表或 `default_roots` 提供。需要写入或分享时，分别用 `legacy_write_roots` 和 `share_roots` 按用户 UK 指定目录。读取整盘的旧授权不会自动获得整盘写入或分享。没有开启 `follow_directory_grants` 时，新连接选出的目录还受原有部署策略限制。
 
-在浏览器打开的百度授权页勾选所需权限，再选择一个或多个目录并确认。同一次授权选中的目录共用这次勾选的权限。需要更换目录时点账号右侧的「重新连接」，按百度页面提示重新选择。授权完成后可用 `baidu_share_capabilities` 核对当前连接的读取、写入和分享范围。[百度网盘《快速授权》](https://pan.baidu.com/union/doc/使用入门/接入授权/快速授权/)
+在浏览器打开的百度授权页查看百度展示的操作权限，在「可访问目录」中选择目录并确认。入口使用 `show_dir=1` 和 `response_type=code`。百度会按应用配置展示权限；页面不一定提供逐项修改权限的开关。需要更换目录时点账号右侧的「重新连接」，按百度页面提示重新选择。授权完成后可用 `baidu_share_capabilities` 核对当前连接的读取、写入和分享范围。[百度网盘《快速授权》](https://pan.baidu.com/union/doc/使用入门/接入授权/快速授权/)
 
 部署时仅反代 `/pan/mcp`、`/pan/authorize`、`/pan/register`、`/pan/token`、`/pan/consent`、`/pan/callback`、`/pan/revoke` 及 `/.well-known/oauth-protected-resource/pan/mcp`、`/.well-known/oauth-authorization-server/pan`。代理不得记录请求参数或 Authorization 头。示例只将带本服务事务前缀的回调送入服务，其他回调继续由原站点处理。具体片段见 `nginx.locations.example`。后端失败时回滚这几条路由即可，其余业务无需重启。
 
@@ -37,4 +37,4 @@
 
 在插件管理页连接百度账号后，`baidu_search` 可以在允许读取的目录下按文件名搜索。`baidu_share_capabilities` 会向百度官方托管的 MCP 查询是否提供分享工具，并返回本连接允许分享的目录。如果百度的工具查询暂时失败，目录权限仍可查看，此时 `provider_tool_available` 为空，`provider_status` 为 `unconfirmed`。`baidu_create_share` 接受一个或多个文件 ID、1／7／30 天有效期及可选的四位小写字母或数字提取码。省略提取码时服务随机生成，默认有效期七天。百度服务返回成功链接后才会返回给客户端。超时后先检查网盘原有分享记录。
 
-创建分享前会核对文件 ID 所属目录、当前连接的分享范围及百度返回的操作结果。选择只读时，插件不能写入或创建公开链接。对于可写连接，实际分享还取决于用户在百度勾选的权限及应用获准的能力。分享使用百度提供的 `file_sharelink_set`，新建目录使用开放平台的文件创建接口。以上操作均可从云端连接调用。[百度官方 MCP](https://github.com/baidu-netdisk/mcp)
+创建分享前会核对文件 ID 所属目录、当前连接的分享范围及百度返回的操作结果。选择只读时，插件不能写入或创建公开链接。对于可写连接，实际分享还取决于百度签发的权限及应用获准的能力。分享使用百度提供的 `file_sharelink_set`，新建目录使用开放平台的文件创建接口。以上操作均可从云端连接调用。[百度官方 MCP](https://github.com/baidu-netdisk/mcp)

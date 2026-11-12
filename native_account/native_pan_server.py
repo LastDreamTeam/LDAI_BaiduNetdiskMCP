@@ -68,6 +68,8 @@ DIRECTORY_TOKEN = "https://pan.baidu.com/xpan/oauth/get"
 
 
 def provider_scopes(value):
+    if isinstance(value, list) and all(isinstance(v, str) for v in value):
+        value = " ".join(value)
     if isinstance(value, str):
         return sorted(set(re.split(r"[,\s]+", value)) - {""})
     return []
@@ -90,24 +92,37 @@ class DirectoryOAuthClient:
 
     async def _request(self, method, params):
         try:
-            # Baidu documents GET for this opaque token exchange. Log neither request URLs nor responses.
             async with httpx.AsyncClient(timeout=18, follow_redirects=False) as client:
                 response = await client.get(DIRECTORY_TOKEN, params={
                     "method": method, "client_id": self.key, "client_secret": self.secret, **params})
-                response.raise_for_status()
-                envelope = response.json()
-            if not isinstance(envelope, dict) or envelope.get("errno") != 0:
-                raise ValueError()
-            data = envelope["data"]
-            if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k]
-                    for k in ("access_token","refresh_token","scope")) or int(data["expires_in"]) <= 0:
-                raise ValueError()
-            # An explicitly empty selection and malformed selections are denied on the file tools.
-            paths = provider_paths(data.get("authorized_paths"))
-            return {k: data[k] for k in ("access_token","refresh_token","scope","expires_in")} | {
-                "token_type":"Bearer", "authorized_paths":paths, "_baidu_directory_flow":True}
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            raise ValueError("Baidu did not complete directory authorization.") from None
+        except httpx.HTTPError:
+            raise ValueError("Baidu's token service could not be reached. Start a new connection.") from None
+        try:
+            envelope = response.json()
+        except ValueError:
+            envelope = None
+        if not isinstance(envelope, dict):
+            raise ValueError(f"Baidu returned an unreadable token response (HTTP {response.status_code}).")
+        errno = envelope.get("errno")
+        if not response.is_success or errno not in (None, 0, "0") or envelope.get("error"):
+            number = str(errno)
+            detail = "Baidu errno " + number if re.fullmatch(r"-?[0-9]{1,10}", number) else "HTTP " + str(response.status_code)
+            raise ValueError(f"Baidu refused the token exchange ({detail}). Start a new connection.")
+        # Live applications also return a flat token object and scopes as an array.
+        data = envelope.get("data", envelope)
+        if not isinstance(data, dict) or not all(isinstance(data.get(k), str) and data[k]
+                for k in ("access_token", "refresh_token")):
+            raise ValueError("Baidu did not return both credentials. Start a new connection.")
+        scopes = provider_scopes(data.get("scope"))
+        try:
+            lifetime = int(data.get("expires_in", 0))
+        except (TypeError, ValueError):
+            lifetime = 0
+        if not scopes or lifetime <= 0:
+            raise ValueError("Baidu returned incomplete grant metadata. Start a new connection.")
+        return {"access_token": data["access_token"], "refresh_token": data["refresh_token"],
+                "scope": " ".join(scopes), "expires_in": lifetime, "token_type": "Bearer",
+                "authorized_paths": provider_paths(data.get("authorized_paths")), "_baidu_directory_flow": True}
 
     async def fetch_token(self, *, code, redirect_uri, **kwargs):
         return await self._request("token", {"code":code, "redirect_uri":redirect_uri})
@@ -226,6 +241,7 @@ class BaiduOAuthProxy(OAuthProxy):
         return DIRECTORY_AUTHORIZE + "?" + urlencode({
             "client_id": self._upstream_client_id,
             "redirect_uri": f"{str(self.base_url).rstrip('/')}{self._redirect_path}",
+            "response_type": "code", "show_dir": "1",
             "scope": DIRECTORY_SCOPES, "state": "ldpan1.directory_v2_" + txn_id})
 
     async def _handle_idp_callback(self, request):
