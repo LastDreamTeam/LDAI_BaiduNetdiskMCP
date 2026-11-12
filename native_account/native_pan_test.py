@@ -39,6 +39,7 @@ async def run():
     async with app.router.lifespan_context(app):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url=origin) as c:
             meta=(await c.get('/.well-known/oauth-authorization-server/pan')).json()
+            assert meta['authorization_response_iss_parameter_supported'] is True
             assert meta['issuer']==origin+'/pan' and meta['authorization_endpoint']==origin+'/pan/authorize'
             assert 'S256' in meta['code_challenge_methods_supported'] and meta.get('registration_endpoint')
             res=await c.post('/pan/mcp',json={'jsonrpc':'2.0','id':1,'method':'initialize','params':{}})

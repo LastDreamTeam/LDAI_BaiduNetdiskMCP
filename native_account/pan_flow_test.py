@@ -56,11 +56,12 @@ async def test():
                     agreed=await c.post('/pan/consent',data={'txn_id':txn,'action':'approve','csrf_token':m[1]})
                     assert agreed.is_redirect,('consent submit',agreed.status_code)
                     target=urlsplit(agreed.headers['location']); up=parse_qs(target.query)
+                    assert up['state'][0].startswith('ldpan1.')
                     assert target.hostname=='openapi.baidu.com' and up['scope']==['basic,netdisk'] and up['redirect_uri']==[origin+'/pan/callback']
                     done=await c.get('/pan/callback',params={'state':up['state'][0],'code':who})
                     assert done.is_redirect,('callback',done.status_code)
                     reply=urlsplit(done.headers['location']); params=parse_qs(reply.query)
-                    assert reply.hostname=='chatgpt.com' and params['state']==[state]
+                    assert reply.hostname=='chatgpt.com' and params['state']==[state] and params['iss']==[origin+'/pan']
                     response=await c.post('/pan/token',data={'code':params['code'][0],'client_id':cid,'grant_type':'authorization_code','redirect_uri':callback,'code_verifier':verifier,'resource':origin+'/pan/mcp'})
                     assert response.status_code==200,('token',response.status_code,response.text[:160])
                     token=response.json()['access_token']

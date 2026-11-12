@@ -5,7 +5,10 @@ import logging
 import os
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from starlette.datastructures import MutableHeaders
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse
 
 import httpx
 import uvicorn
@@ -43,6 +46,20 @@ async def provider_request(token: str, endpoint: str, params: dict) -> dict:
 
 
 class BaiduOAuthProxy(OAuthProxy):
+    # Only our transactions use this state prefix. Existing users of the same
+    # Baidu callback must continue through the original web application.
+    def _build_upstream_authorize_url(self, txn_id, transaction):
+        return super()._build_upstream_authorize_url("ldpan1." + txn_id, transaction)
+
+    async def _handle_idp_callback(self, request):
+        states = request.query_params.getlist("state")
+        if len(states) != 1 or not states[0].startswith("ldpan1."):
+            return PlainTextResponse("Unknown authorization transaction", status_code=400)
+        params = [(k, v.removeprefix("ldpan1.") if k == "state" else v)
+                  for k, v in request.query_params.multi_items()]
+        scope = dict(request.scope, query_string=urlencode(params).encode("ascii"))
+        return await super()._handle_idp_callback(Request(scope, request.receive))
+
     def _prepare_scopes_for_token_exchange(self, scopes):
         return []
 
@@ -98,7 +115,7 @@ def read_roots(policy, uid):
     if policy is None:
         raise ValueError("No authorized directories configured.")
     value = json.loads(policy.read_text(encoding="utf-8-sig"))
-    roots = value.get(uid) if isinstance(value, dict) else None
+    roots = value.get(uid, value.get("default_roots")) if isinstance(value, dict) else None
     if not isinstance(roots, list) or not roots or not all(isinstance(x, str) for x in roots):
         raise ValueError("No authorized directories configured for this account.")
     return [checked_path(x) for x in roots]
@@ -113,6 +130,12 @@ def register_read_tools(server, grant=current_grant, lookup=None, roots=None):
         bound = grant()
         # Return only this authenticated user's own identity. Data access is checked separately.
         return dict(bound.claims["profile"])
+
+    @server.tool(name="baidu_allowed_directories", annotations={"readOnlyHint": True})
+    def directories() -> list[str]:
+        """List the directories allowed for this authenticated account."""
+        bound = grant()
+        return roots(bound.claims["profile"]["id"]) if roots is not None else []
 
     @server.tool(name="baidu_list", annotations={"readOnlyHint": True, "destructiveHint": False})
     async def directory(path: str = "/", start: Annotated[int,Field(ge=0)] = 0,
@@ -155,9 +178,55 @@ def build_server(public_origin: str, redirect_uri: str, app_key: str, app_secret
                       token_endpoint_auth_method="client_secret_post", enable_cimd=False,
                       extra_authorize_params={"scope":"basic,netdisk"},
                       require_authorization_consent=True)
+    auth.openai_callback = redirect_uri
     server = FastMCP("Baidu Netdisk", auth=auth)
     register_read_tools(server, roots=lambda uid: read_roots(policy, uid))
     return server
+
+
+class OAuthIssuerResponse:
+    """RFC 9207 issuer identification for the registered client's authorization responses."""
+    def __init__(self, app, *, issuer, callback):
+        self.app = app
+        self.issuer = issuer
+        self.callback = urlsplit(callback)
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        discovery = scope["path"] in {
+            "/.well-known/oauth-authorization-server/pan", "/.well-known/openid-configuration/pan"
+        }
+        start = None
+        parts = []
+
+        async def respond(message):
+            nonlocal start
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                target = urlsplit(headers.get("location", ""))
+                if message["status"] in (302,303,307,308) and target[:3] == self.callback[:3]:
+                    fields = parse_qsl(target.query, keep_blank_values=True)
+                    if any(key in ("code","error") for key, _ in fields):
+                        fields = [(key, val) for key, val in fields if key != "iss"]
+                        fields.append(("iss", self.issuer))
+                        headers["location"] = urlunsplit(target._replace(query=urlencode(fields)))
+                if (discovery and scope["method"] == "GET" and message["status"] == 200
+                        and headers.get("content-type", "").startswith("application/json")):
+                    start = message
+                    return
+            elif start is not None and message["type"] == "http.response.body":
+                parts.append(message.get("body", b""))
+                if message.get("more_body"):
+                    return
+                data = json.loads(b"".join(parts))
+                data["authorization_response_iss_parameter_supported"] = True
+                body = json.dumps(data).encode()
+                MutableHeaders(scope=start)["content-length"] = str(len(body))
+                await send(start)
+                return await send({"type": "http.response.body", "body": body})
+            await send(message)
+        await self.app(scope, receive, respond)
 
 
 def http_app(server):
@@ -165,7 +234,9 @@ def http_app(server):
     routes = [route for route in server.auth.get_well_known_routes("/mcp")
               if route.path.endswith(("/pan", "/pan/mcp"))]
     routes.append(Mount("/pan", app=child))
-    return Starlette(routes=routes, lifespan=child.router.lifespan_context)
+    app = Starlette(routes=routes, lifespan=child.router.lifespan_context)
+    app.add_middleware(OAuthIssuerResponse, issuer=str(server.auth.issuer_url), callback=server.auth.openai_callback)
+    return app
 
 
 if __name__ == "__main__":

@@ -44,14 +44,17 @@ location = /pan/consent {
     proxy_set_header Connection "";
     proxy_pass http://127.0.0.1:8201;
 }
-location = /pan/callback {
+# At server scope. Pass existing callback traffic through its original handler.
+if ($request_uri ~ "^/pan/callback\?(?:[^&]*&)*state=ldpan1\.[A-Za-z0-9_-]+(?:&|$)") {
+    rewrite ^ /__ldai_baidu_oauth_callback last;
+}
+location = /__ldai_baidu_oauth_callback {
+    internal;
     access_log off;
     proxy_http_version 1.1;
-    proxy_buffering off;
     proxy_set_header Host $host;
     proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header Connection "";
-    proxy_pass http://127.0.0.1:8201;
+    proxy_pass http://127.0.0.1:8201/pan/callback;
 }
 location = /pan/revoke {
     access_log off;
