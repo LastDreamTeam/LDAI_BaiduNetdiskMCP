@@ -2,7 +2,19 @@
 
 > **自用项目** · 本仓库主要供维护者自用。
 
-通过 bdpan 和可选的百度网盘开放平台授权管理用户的网盘文件。 本仓库是独立维护的第三方 stdio MCP 连接器。
+[English quick start](#english-quick-start)
+
+让 Agent 在你授权的百度网盘目录里找文件，并在需要时把文件下载到这台电脑。这个第三方连接器有两种本机授权路径，另有可独立部署的插件页服务。
+
+## 先选你要访问的网盘目录
+
+| 你手头已有的授权 | 第一次可以做什么 |
+| --- | --- |
+| 已用 `bdpan` 登录应用空间 | 让 Agent 调用 `baidu_status` 核对身份，再用 `baidu_list` 列出应用目录的文件。 |
+| 自有开放平台应用的 OAuth 授权 | 将 `BAIDU_ACCESS_TOKEN_FILE` 指向本地令牌文件，用 `baidu_authorized_list` 列出这次授权允许访问的目录。 |
+| 已部署插件页账号服务 | 在插件详情页连接自己的百度账号，在百度授权页选择目录。[连接与部署说明](native_account/README.md) |
+
+例如，可以先问「列出我授权目录里的文件，只给我文件名」。列出的文件应该能在同一账号的相应目录中找到。下载到本机时，再从结果中选定目标。
 
 ## 安装运行环境
 
@@ -32,20 +44,6 @@ python client_config.py codex
 
 可重复使用 `--env NAME=VALUE` 传递这些设置：`BDPAN_BIN`、`BDPAN_EXCHANGE_DIR`、`BAIDU_ACCESS_TOKEN_FILE`。涉及密钥的设置只填写私有文件的路径。在客户端刷新工具后先调用 `baidu_status`。各端使用同一个服务入口，克隆到另一台机器时重新生成路径。仓库另附 Codex 插件清单、图标和技能，可用于打包本地插件。若插件被复制到客户端缓存，可通过进程环境 `LDAI_MCP_PYTHON` 指定已安装依赖的 Python 绝对路径。 [Cursor MCP 文档](https://cursor.com/docs/mcp) · [DSH MCP 客户端](https://github.com/deepseek-ai/deepseek-harness/blob/main/packages/mcp/mcp-client/README.zh.md)
 
-## 实现参考
-
-GitHub 数据核对日期为 2026-11-11。
-
-采用百度官方技能的 CLI 登录与应用目录约定，参照官方 MCP 增加独立 OAuth 目录查询。DSH 百度网盘项目作为客户端接入对照。
-
-- [baidu-netdisk/bdpan-storage](https://github.com/baidu-netdisk/bdpan-storage) · 336 stars，默认分支 98 次提交
-- [baidu-netdisk/mcp](https://github.com/baidu-netdisk/mcp) · 164 stars，默认分支 7 次提交
-- [justinzyc271828-sys/dsh-baidu-netdisk](https://github.com/justinzyc271828-sys/dsh-baidu-netdisk) · 2 stars，默认分支 1 次提交
-
-## 许可
-
-本项目以 **GNU Affero General Public License v3.0 only（AGPL-3.0-only）** 发布。分发受许可覆盖的修改版或通过网络向用户提供修改版时，应按许可条款向相应用户提供对应源码。仅在本机自行使用无需公开发布。第三方服务及依赖遵循各自条款。[许可全文](LICENSE)
-
 ## 账号管理窗口
 
 账号版从本插件详情页点「管理」→「已连接的账户」→「连接另一个账户」。已连接账号右侧菜单提供重命名、重新连接和断开连接。
@@ -66,8 +64,24 @@ MCP 入口为 `router.py`，需要 Python 3.11+。主机在本地保存账号配
 
 维护者在 main 提交改进、运行测试，并同步更新 connector.json、两个插件清单的版本，再执行 `python build_plugin.py --push`。此命令将 main 与版本标签一起推送到本仓库，再从已提交文件生成 ZIP。更新既有账号插件时传 `--account-name <既有包名>`，把生成的 ZIP 发布到同一插件。包内 release-source.json 记录精确提交，可与各终端核对。Git 推送与账号插件发布是两个独立步骤。
 
-许可为 **AGPL-3.0-only**。[许可全文](LICENSE)
-
 开放平台账号可在管理窗口填写自己的 Client ID、Client Secret 文件路径和 Token 文件路径，点击「重新连接」后在百度官方页面输入设备码。成功后原子替换本机授权，失败保留旧授权。应用空间和开放平台的授权目录可分别设置。[百度官方授权接口](https://github.com/baidu-netdisk/baidu-drive-sdk-go/tree/main/baidudriver/api)
 
 [从插件页连接百度账号及部署自己的 OAuth 服务](native_account/README.md)
+
+## English quick start
+
+Use the independently maintained stdio connector with an authorized Baidu Netdisk account. Install Python 3.11+, install `requirements.txt` in a virtual environment, sign in with the official bdpan CLI, and check `bdpan whoami`. Run `python client_config.py cursor`, merge the generated entry into your client, then call `baidu_list` to see your application directory. A separate Open Platform token grants access to the directories selected for that application.
+
+## 实现参考
+
+GitHub 数据核对日期为 2026-11-11。
+
+采用百度官方技能的 CLI 登录与应用目录约定，参照官方 MCP 增加独立 OAuth 目录查询。DSH 百度网盘项目作为客户端接入对照。
+
+- [baidu-netdisk/bdpan-storage](https://github.com/baidu-netdisk/bdpan-storage) · 336 stars，默认分支 98 次提交
+- [baidu-netdisk/mcp](https://github.com/baidu-netdisk/mcp) · 164 stars，默认分支 7 次提交
+- [justinzyc271828-sys/dsh-baidu-netdisk](https://github.com/justinzyc271828-sys/dsh-baidu-netdisk) · 2 stars，默认分支 1 次提交
+
+## 许可
+
+本项目以 **GNU Affero General Public License v3.0 only（AGPL-3.0-only）** 发布。分发受许可覆盖的修改版或通过网络向用户提供修改版时，应按许可条款向相应用户提供对应源码。仅在本机自行使用无需公开发布。第三方服务及依赖遵循各自条款。[许可全文](LICENSE)
